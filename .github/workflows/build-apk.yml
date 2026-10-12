@@ -32,9 +32,21 @@ jobs:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
           accept-android-sdk-licenses: true
 
-      - name: Install web dependencies and build assets
-        working-directory: OM-Shift-Manager-Android/web
+      - name: Detect project folder
         run: |
+          if [ -f "$GITHUB_WORKSPACE/OM-Shift-Manager-Android/web/package.json" ]; then
+            echo "PROJECT_DIR=OM-Shift-Manager-Android" >> "$GITHUB_ENV"
+          elif [ -f "$GITHUB_WORKSPACE/web/package.json" ]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+          else
+            echo 'Could not find web/package.json. Upload the project folder contents or the complete OM-Shift-Manager-Android folder.'
+            find . -maxdepth 3 -name package.json -print
+            exit 1
+          fi
+
+      - name: Install web dependencies and build assets
+        run: |
+          cd "$PROJECT_DIR/web"
           npm install
           npm run build
 
@@ -44,13 +56,14 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build debug APK
-        working-directory: OM-Shift-Manager-Android
-        run: gradle assembleDebug --stacktrace
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: om-shift-manager-debug-apk
-          path: OM-Shift-Manager-Android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
