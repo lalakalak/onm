@@ -1,0 +1,34 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.omshiftmanager.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.omshiftmanager.app'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+}
+
+def webDir = file('../web')
+def webAssets = file('src/main/assets/www')
+
+tasks.register('installWebDependencies', Exec) {
+    workingDir webDir
+    commandLine 'npm', 'install'
+}
+
+tasks.register('buildWebApp', Exec) {
+    dependsOn 'installWebDependencies'
+    workingDir webDir
+    commandLine 'npm', 'run', 'build'
+    doLast {
+        delete webAssets
+        copy { from file('../web/dist'); into webAssets }
+    }
+}
+
+tasks.named('preBuild').configure { dependsOn 'buildWebApp' }
