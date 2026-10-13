@@ -16,3 +16,9 @@ The file `lalakalak/Onmjson`, branch `main`, root file `onm.json` must contain v
 - Viewers remain read-only.
 
 After deploying the Worker update, build and install the updated APK once. Future React changes still require a new APK until the app is switched to hosted React.
+
+## Automatic cross-device sync
+
+The React app checks the shared roster every 5 seconds while the app is visible. It also checks again when the browser/Android WebView returns to the foreground. Viewers receive the latest roster automatically; signed-in admins can save changes through the authenticated Worker. A local admin edit that has not yet matched the last successful save is not replaced by a polling response.
+
+Note: this is polling-based sync, not push/WebSocket real-time. Background Android execution may pause polling. For robust multi-admin conflict prevention, use a server-side revision/ETag compare-and-swap before accepting writes; polling alone does not eliminate simultaneous-edit conflicts.
