@@ -1,0 +1,14 @@
+Updates in this project ZIP
+
+1) Mobile navigation
+- At widths up to 760px, the sidebar becomes a slide-in drawer.
+- A fixed menu button opens it; tapping a page or the backdrop closes it.
+- Desktop sidebar behavior is unchanged.
+
+2) Android roster image export
+- exportSheetImage now converts the rendered roster PNG to a Blob and sends it through AndroidStorage.saveDownload when running in the Android wrapper.
+- The existing MainActivity AndroidStorage.saveDownload bridge uses ACTION_CREATE_DOCUMENT, allowing the user to choose a save location and filename.
+- In a regular browser, it uses the browser download helper.
+
+Build note
+- The source ZIP was updated, but npm run build could not be completed in this environment because web dependencies (Vite/node_modules) are not installed and network access is unavailable. Run npm install and npm run build in web/, then use GitHub Actions to build the APK.
