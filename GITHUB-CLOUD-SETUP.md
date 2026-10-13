@@ -24,3 +24,8 @@ Never place the GitHub token in React code, Android source, or an APK. The share
 ## Build
 
 From `OM-Shift-Manager-Android/web`, run `npm install` then `npm run build`. The Android project can then be built using the included instructions. Build verification was not possible in the current environment because dependencies were not installed.
+
+
+## Automatic cloud connection update
+
+This build attempts to load the shared roster from the Cloudflare Worker automatically when the React app starts. Ensure the public GitHub onm.json contains the full O&M Shift Manager data structure (employees, roster, and leaves). If the cloud fetch fails, check the in-app notification and Worker endpoint. Admin writes still require the Worker ADMIN_PASSWORD and are not automatically authenticated by this change.
