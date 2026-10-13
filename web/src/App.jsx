@@ -26,15 +26,75 @@ function App(){
  const sheetRef=useRef(null);
  const lastSyncedDataRef=useRef('');
  const syncInFlightRef=useRef(false);
+ const cloudSaveInFlightRef=useRef(false);
+ const saveQueueRef=useRef(Promise.resolve());
+ const saveTimerRef=useRef(null);
  const fingerprint=(value)=>JSON.stringify({employees:value.employees||[],roster:value.roster||[],leaves:value.leaves||[],monthlyPlans:value.monthlyPlans||[],users:value.users||[]});
- useEffect(()=>{if(!jsonHandle)return;let cancelled=false;(async()=>{try{const payload={...data,savedAt:new Date().toISOString()};if(cloudConnected){if(!cloudToken){if(!cancelled)setStorageStatus('Cloud connected · sign in as admin to enable saving');return;}const response=await fetch(CLOUD_ROSTER_URL,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':`Bearer ${cloudToken}`},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok||!result.success)throw new Error(result.error||'Cloud save failed');lastSyncedDataRef.current=fingerprint(data);if(!cancelled)setStorageStatus('Saved to GitHub');}else{const writable=await jsonHandle.createWritable();await writable.write(JSON.stringify(payload,null,2));await writable.close();if(!cancelled)setStorageStatus('Saved to JSON file');}}catch(err){if(!cancelled){setStorageStatus('Save failed');setNotice('Could not save data: '+err.message);}}})();return()=>{cancelled=true}},[data,jsonHandle,cloudConnected,cloudToken]);
+
+ // Debounce rapid UI changes and serialize cloud writes. This prevents multiple
+ // overlapping PUT requests when users click several weekly-off checkboxes.
+ useEffect(()=>{
+   if(!jsonHandle)return;
+   let cancelled=false;
+   if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
+   saveTimerRef.current=setTimeout(()=>{
+     const snapshot=data;
+     const snapshotFingerprint=fingerprint(snapshot);
+     if(cloudConnected && !cloudToken){
+       setStorageStatus('Cloud connected · sign in as admin to enable saving');
+       return;
+     }
+     if(cloudConnected && snapshotFingerprint===lastSyncedDataRef.current)return;
+
+     saveQueueRef.current=saveQueueRef.current.catch(()=>{}).then(async()=>{
+       if(cancelled)return;
+       try{
+         const payload={...snapshot,savedAt:new Date().toISOString()};
+         if(cloudConnected){
+           cloudSaveInFlightRef.current=true;
+           const response=await fetch(CLOUD_ROSTER_URL,{
+             method:'PUT',
+             headers:{'Content-Type':'application/json','Authorization':`Bearer ${cloudToken}`},
+             body:JSON.stringify(payload)
+           });
+           const result=await response.json();
+           if(!response.ok||!result.success){
+             if(response.status===409||result.conflict){
+               // Do not overwrite a newer version. Polling will fetch the latest
+               // roster; ask the user to re-apply their edit if necessary.
+               throw new Error('The roster changed on the server. Latest data will be synced; please re-apply your change.');
+             }
+             throw new Error(result.error||'Cloud save failed');
+           }
+           lastSyncedDataRef.current=snapshotFingerprint;
+           if(!cancelled)setStorageStatus('Saved to GitHub');
+         }else{
+           const writable=await jsonHandle.createWritable();
+           await writable.write(JSON.stringify(payload,null,2));
+           await writable.close();
+           if(!cancelled)setStorageStatus('Saved to JSON file');
+         }
+       }catch(err){
+         if(!cancelled){
+           setStorageStatus('Save failed');
+           setNotice('Could not save data: '+err.message);
+         }
+       }finally{
+         cloudSaveInFlightRef.current=false;
+       }
+     });
+   },500);
+
+   return ()=>{cancelled=true;if(saveTimerRef.current)clearTimeout(saveTimerRef.current);};
+ },[data,jsonHandle,cloudConnected,cloudToken]);
+
  const connectCloud=async()=>{try{const response=await fetch(CLOUD_ROSTER_URL,{cache:'no-store'});if(!response.ok)throw new Error('Cloud endpoint returned '+response.status);const parsed=await response.json();if(!validData(parsed))throw new Error('GitHub onm.json is not a valid O&M app data file. Export your current app JSON and replace the test JSON in GitHub first.');const next={employees:parsed.employees,roster:parsed.roster,leaves:parsed.leaves,monthlyPlans:Array.isArray(parsed.monthlyPlans)?parsed.monthlyPlans:[],users:Array.isArray(parsed.users)&&parsed.users.length?parsed.users:defaultUsers};lastSyncedDataRef.current=fingerprint(next);setData(next);setCloudConnected(true);setJsonHandle({name:'GitHub cloud JSON'});setCurrentUser(null);setLoginForm({username:'',password:''});setStorageStatus('Connected to GitHub roster');flash('Loaded shared roster from GitHub.');}catch(err){flash('Could not connect to GitHub roster: '+err.message);}};
  const loadJsonHandle=async(handle)=>{const file=await handle.getFile();if(!file.size)throw new Error('This JSON file is empty. Use Create new JSON file if you want to start fresh.');const parsed=JSON.parse(await file.text());if(!validData(parsed))throw new Error('Selected file is not a valid O&M Shift Manager JSON file.');const next={employees:parsed.employees,roster:parsed.roster,leaves:parsed.leaves,monthlyPlans:Array.isArray(parsed.monthlyPlans)?parsed.monthlyPlans:[],users:Array.isArray(parsed.users)&&parsed.users.length?parsed.users:defaultUsers};setData(next);setCurrentUser(null);setLoginForm({username:'',password:''});setJsonHandle(handle);setStorageStatus('Connected JSON file');flash(`Loaded existing data from ${file.name}.`);};
  const makeAndroidHandle=()=>({name:'om-shift-manager-data.json',getFile:async()=>{const text=window.AndroidStorage.readJson();return {name:'om-shift-manager-data.json',size:text.length,text:async()=>text};},createWritable:async()=>{let pending='';return {write:async value=>{pending=String(value);},close:async()=>{window.AndroidStorage.writeJson(pending);}};}});
  const connectJsonFile=async()=>{try{if(window.AndroidStorage){const handle=makeAndroidHandle();if(!window.AndroidStorage.hasDataFile()){flash('No app JSON file found. Create one first.');return;}await loadJsonHandle(handle);return;}if(!window.showOpenFilePicker){flash('Use Chrome or Edge on localhost to open an existing JSON file.');return;}const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'O&M Shift Manager JSON',accept:{'application/json':['.json']}}]});await loadJsonHandle(handle);}catch(err){if(err.name!=='AbortError')flash('Could not open JSON file: '+err.message);}};
  const createJsonFile=async()=>{try{if(window.AndroidStorage){const handle=makeAndroidHandle();const initial={...emptyData,users:defaultUsers,savedAt:new Date().toISOString()};window.AndroidStorage.writeJson(JSON.stringify(initial,null,2));setData(initial);setCurrentUser(null);setJsonHandle(handle);setStorageStatus('Saved to app JSON file');flash('App JSON data file created.');return;}if(!window.showSaveFilePicker){flash('Use Chrome or Edge on localhost to create a JSON file.');return;}const handle=await window.showSaveFilePicker({suggestedName:'om-shift-manager-data.json',types:[{description:'JSON data file',accept:{'application/json':['.json']}}]});setData({...emptyData,users:defaultUsers});setCurrentUser(null);setJsonHandle(handle);setStorageStatus('New JSON file connected');flash('New JSON file created.');}catch(err){if(err.name!=='AbortError')flash('Could not create JSON file: '+err.message);}};
  useEffect(()=>{let cancelled=false;(async()=>{try{await connectCloud();}catch(err){if(!cancelled)setNotice('Could not connect to shared GitHub roster: '+err.message);}})();return()=>{cancelled=true};},[]);
- useEffect(()=>{if(!cloudConnected)return;let stopped=false;let timer;const syncLatest=async()=>{if(stopped||document.visibilityState==='hidden'||syncInFlightRef.current)return;try{const localFingerprint=fingerprint(data);if(isAdmin&&lastSyncedDataRef.current&&localFingerprint!==lastSyncedDataRef.current){return;}const response=await fetch(CLOUD_ROSTER_URL,{cache:'no-store'});if(!response.ok)return;const remote=await response.json();if(!validData(remote))return;const next={employees:remote.employees,roster:remote.roster,leaves:remote.leaves,monthlyPlans:Array.isArray(remote.monthlyPlans)?remote.monthlyPlans:[],users:Array.isArray(remote.users)&&remote.users.length?remote.users:defaultUsers};const remoteFingerprint=fingerprint(next);if(remoteFingerprint!==fingerprint(data)){lastSyncedDataRef.current=remoteFingerprint;setData(next);setStorageStatus('Synced with shared roster');}}catch{/* Keep the current data during temporary network failures. */}};timer=setInterval(syncLatest,3000);const onVisible=()=>{if(document.visibilityState==='visible')syncLatest();};document.addEventListener('visibilitychange',onVisible);return()=>{stopped=true;clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);};},[cloudConnected,data,isAdmin]);
+ useEffect(()=>{if(!cloudConnected)return;let stopped=false;let timer;const syncLatest=async()=>{if(stopped||document.visibilityState==='hidden'||syncInFlightRef.current||cloudSaveInFlightRef.current)return;syncInFlightRef.current=true;try{const localFingerprint=fingerprint(data);if(isAdmin&&lastSyncedDataRef.current&&localFingerprint!==lastSyncedDataRef.current){return;}const response=await fetch(CLOUD_ROSTER_URL,{cache:'no-store'});if(!response.ok)return;const remote=await response.json();if(!validData(remote))return;const next={employees:remote.employees,roster:remote.roster,leaves:remote.leaves,monthlyPlans:Array.isArray(remote.monthlyPlans)?remote.monthlyPlans:[],users:Array.isArray(remote.users)&&remote.users.length?remote.users:defaultUsers};const remoteFingerprint=fingerprint(next);if(remoteFingerprint!==fingerprint(data)){lastSyncedDataRef.current=remoteFingerprint;setData(next);setStorageStatus('Synced with shared roster');}}catch{/* Keep the current data during temporary network failures. */}finally{syncInFlightRef.current=false;}};timer=setInterval(syncLatest,5000);const onVisible=()=>{if(document.visibilityState==='visible')syncLatest();};document.addEventListener('visibilitychange',onVisible);return()=>{stopped=true;clearInterval(timer);document.removeEventListener('visibilitychange',onVisible);};},[cloudConnected,data,isAdmin]);
 
  useEffect(()=>{if(!cloudConnected)return;try{const saved=JSON.parse(localStorage.getItem('om-shift-manager-session')||'null');if(!saved||!saved.username||!saved.expiresAt||saved.expiresAt<=Date.now()){localStorage.removeItem('om-shift-manager-session');return;}const user=(data.users||[]).find(u=>u.active!==false&&u.username.toLowerCase()===saved.username.toLowerCase());if(!user){localStorage.removeItem('om-shift-manager-session');return;}setCurrentUser(user);setCloudToken(user.role==='admin'?(saved.token||''):'');setPage(user.role==='admin'?'Dashboard':'Monthly Roster');}catch{localStorage.removeItem('om-shift-manager-session');}},[cloudConnected,data.users]);
  const login=async(ev)=>{ev.preventDefault();try{const username=loginForm.username.trim().toLowerCase();const password=loginForm.password;const passwordHash=await hashPassword(password);const user=(data.users||[]).find(u=>u.active!==false&&u.username.toLowerCase()===username&&u.passwordHash===passwordHash);if(!user){flash('Invalid username or password.');return;}let token='';let expiresAt=Date.now()+30*24*60*60*1000;if(user.role==='admin'&&cloudConnected){const authResponse=await fetch(CLOUD_ROSTER_URL.replace(/\/roster$/, '/auth/login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});const authResult=await authResponse.json();if(!authResponse.ok||!authResult.success)throw new Error(authResult.error||'Cloud admin authentication failed. Update the Cloudflare Worker to enable account-based writes.');token=authResult.token;expiresAt=authResult.expiresAt||expiresAt;setCloudToken(token);}localStorage.setItem('om-shift-manager-session',JSON.stringify({username:user.username,token,expiresAt}));setCurrentUser(user);setPage(user.role==='admin'?'Dashboard':'Monthly Roster');setLoginForm({username:'',password:''});flash(`Welcome, ${user.displayName||user.username}.`);}catch(err){flash('Login failed: '+err.message);}};
