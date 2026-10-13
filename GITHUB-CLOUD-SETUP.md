@@ -1,31 +1,18 @@
 # GitHub cloud roster setup
 
-The React app now has a **Connect shared GitHub roster** option. It reads from:
-`https://onm-roster-api.abhikath08.workers.dev/roster`
+The app reads shared data from `https://onm-roster-api.abhikath08.workers.dev/roster`.
 
-When connected, log in to the app using the admin account stored in the roster JSON. Before making edits, use **Enable cloud saving** and enter the `ADMIN_PASSWORD` value configured as a Cloudflare Worker secret. The password is held in memory for the current session and is not written into the app files.
+## Cloudflare Worker update required
+Use `cloudflare-worker/worker.js` and follow `cloudflare-worker/README.md`. Keep `GH_TOKEN` as a Cloudflare secret and add `AUTH_SECRET` as a separate long random Cloudflare secret. Do not place either secret in the React app or APK.
 
-## Important: upload a real app data file first
+## GitHub JSON
+The file `lalakalak/Onmjson`, branch `main`, root file `onm.json` must contain valid app data: `employees`, `roster`, and `leaves` arrays, plus `monthlyPlans` and `users` as needed. The test-only JSON `{"name":"Abhishek"}` is not valid app data.
 
-The current GitHub file shown in the setup screenshot contains only:
-`{"name":"Abhishek"}`
+## New behavior
+- Android WebView DOM storage is enabled so login/session storage works.
+- The app calls the Worker with CORS/preflight support.
+- Admin login obtains a signed 30-day token from `/auth/login`; cloud saving is enabled automatically for that signed-in admin. There is no separate “Enable cloud saving” button.
+- Login session is remembered on the same device until it expires or the user logs out. A password is not stored in browser storage.
+- Viewers remain read-only.
 
-That is a connectivity test, not an O&M Shift Manager data file. The app requires an object with `employees`, `roster`, and `leaves` arrays (and optionally `monthlyPlans` and `users`). Use **Export JSON** from the existing app, then commit that exported app data as `onm.json` in the root of `lalakalak/Onmjson` on branch `main`.
-
-## Worker configuration
-
-- `GH_TOKEN`: Cloudflare Worker secret with GitHub repository Contents read/write permission, scoped to `lalakalak/Onmjson`.
-- `ADMIN_PASSWORD`: Cloudflare Worker secret for the admin write endpoint.
-- Public GET endpoint: `/roster`
-- Authenticated PUT endpoint: `/roster`, header `X-Admin-Password`
-
-Never place the GitHub token in React code, Android source, or an APK. The shared password scheme is a simple initial setup; use stronger per-user server-side authentication before broad distribution.
-
-## Build
-
-From `OM-Shift-Manager-Android/web`, run `npm install` then `npm run build`. The Android project can then be built using the included instructions. Build verification was not possible in the current environment because dependencies were not installed.
-
-
-## Automatic cloud connection update
-
-This build attempts to load the shared roster from the Cloudflare Worker automatically when the React app starts. Ensure the public GitHub onm.json contains the full O&M Shift Manager data structure (employees, roster, and leaves). If the cloud fetch fails, check the in-app notification and Worker endpoint. Admin writes still require the Worker ADMIN_PASSWORD and are not automatically authenticated by this change.
+After deploying the Worker update, build and install the updated APK once. Future React changes still require a new APK until the app is switched to hosted React.

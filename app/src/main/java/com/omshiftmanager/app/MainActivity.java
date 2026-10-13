@@ -40,8 +40,8 @@ public class MainActivity extends Activity {
         // Allow local module imports in this packaged, offline app.
         webView.getSettings().setAllowFileAccessFromFileURLs(true);
         webView.getSettings().setAllowUniversalAccessFromFileURLs(true);
-        webView.getSettings().setDomStorageEnabled(false);
-        webView.getSettings().setDatabaseEnabled(false);
+        webView.getSettings().setDomStorageEnabled(true);
+        webView.getSettings().setDatabaseEnabled(true);
         webView.addJavascriptInterface(new AndroidStorage(), "AndroidStorage");
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
